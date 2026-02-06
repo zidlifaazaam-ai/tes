@@ -1,0 +1,214 @@
+--- START OF FILE webai.html ---
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini 3 Flash - Multimodal</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 20px; margin: 0; }
+        .chat-container { width: 100%; max-width: 800px; background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; height: 95vh; }
+        
+        #chat-box { flex: 1; padding: 20px; overflow-y: auto; background: #fafafa; display: flex; flex-direction: column; }
+        .message { margin-bottom: 15px; padding: 12px 18px; border-radius: 15px; max-width: 85%; line-height: 1.5; font-size: 0.95em; position: relative; word-wrap: break-word; }
+        .user { background: #0084ff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .ai { background: #e4e6eb; color: #1c1e21; align-self: flex-start; border-bottom-left-radius: 2px; white-space: pre-wrap; }
+        
+        /* Style untuk gambar di dalam chat */
+        .chat-img { max-width: 100%; border-radius: 10px; margin-top: 10px; display: block; }
+        .gen-img { width: 100%; max-width: 400px; border-radius: 10px; margin-top: 10px; cursor: pointer; border: 2px solid #1a73e8; }
+
+        .input-area { padding: 15px; background: white; border-top: 1px solid #eee; }
+        .input-wrapper { display: flex; gap: 10px; align-items: center; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 25px; outline: none; }
+        
+        .btn { padding: 10px 15px; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; transition: 0.3s; display: flex; align-items: center; justify-content: center; }
+        #send-btn { background: #1a73e8; color: white; min-width: 80px; }
+        #clear-btn { background: #ff4d4d; color: white; }
+        #upload-btn { background: #34a853; color: white; }
+        
+        #image-preview-container { display: none; padding: 10px; background: #f8f9fa; border-top: 1px solid #ddd; align-items: center; gap: 10px; }
+        #preview-img { height: 50px; border-radius: 5px; border: 1px solid #ccc; }
+        .remove-img { color: red; cursor: pointer; font-weight: bold; font-size: 1.2em; }
+
+        .status-info { font-size: 0.75em; color: #888; padding: 5px 20px; text-align: right; }
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div id="chat-box">
+        <div class="message ai">Halo! Saya Gemini 3 . Saya bisa menjawab pertanyaan Anda (Contoh: "siapa bapak presiden indonesia tahun 2026
+            ").</div>
+    </div>
+
+    <div id="image-preview-container">
+        <img id="preview-img" src="" alt="Preview">
+        <span id="preview-name" style="font-size: 0.8em; flex: 1;"></span>
+        <span class="remove-img" onclick="cancelImage()">×</span>
+    </div>
+
+    <div class="status-info" id="status-info">Ready</div>
+
+    <div class="input-area">
+        <div class="input-wrapper">
+            <button class="btn" id="clear-btn" onclick="clearChat()">Reset</button>
+            
+            <label for="image-input" class="btn" id="upload-btn">📷</label>
+            <input type="file" id="image-input" accept="image/*" onchange="handleImageSelect(event)">
+            
+            <input type="text" id="user-input" placeholder="Ketik pesan atau minta gambar..." onkeypress="handleKeyPress(event)">
+            
+            <button class="btn" id="send-btn" onclick="sendMessage()">Kirim</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
+
+    const API_KEY = "AIzaSyAviyyfoHqnclletvrlESNFImx2ptk_plE"; 
+    const genAI = new GoogleGenerativeAI(API_KEY);
+
+    let chatSession = null;
+    let selectedImageBase64 = null;
+
+    function initChat() {
+        const systemInstruction = "Kamu adalah AI buatan CEO Faaz Trans. Kamu bisa melihat gambar dan juga bisa membuat gambar menggunakan perintah khusus. Jika user meminta dibuatkan gambar, berikan deskripsi singkat lalu tampilkan gambar tersebut.";
+        
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-3-flash-preview", // Menggunakan 1.5 Flash yang stabil untuk multimodal
+            systemInstruction: systemInstruction
+        });
+
+        chatSession = model.startChat({
+            history: [],
+            generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
+        });
+    }
+
+    // Fungsi konversi file ke Base64 untuk Gemini
+    async function fileToGenerativePart(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve({
+                inlineData: { data: reader.result.split(',')[1], mimeType: file.type }
+            });
+            reader.readAsDataURL(file);
+        });
+    }
+
+    window.handleImageSelect = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            document.getElementById('preview-img').src = event.target.result;
+            document.getElementById('preview-name').innerText = file.name;
+            document.getElementById('image-preview-container').style.display = 'flex';
+            selectedImageBase64 = file; // Simpan file aslinya
+        };
+        reader.readAsDataURL(file);
+    };
+
+    window.cancelImage = () => {
+        selectedImageBase64 = null;
+        document.getElementById('image-input').value = "";
+        document.getElementById('image-preview-container').style.display = 'none';
+    };
+
+    window.sendMessage = async () => {
+        const inputField = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const statusInfo = document.getElementById('status-info');
+        const text = inputField.value.trim();
+
+        if (!text && !selectedImageBase64) return;
+
+        if (!chatSession) initChat();
+
+        // UI: Tampilkan pesan user
+        const userMsgDiv = appendMessage('user', text);
+        
+        // Jika ada gambar yang diupload
+        let imagePart = null;
+        if (selectedImageBase64) {
+            const imgElement = document.createElement('img');
+            imgElement.src = document.getElementById('preview-img').src;
+            imgElement.className = "chat-img";
+            userMsgDiv.appendChild(imgElement);
+            
+            imagePart = await fileToGenerativePart(selectedImageBase64);
+            cancelImage(); // Bersihkan preview
+        }
+
+        inputField.value = '';
+        sendBtn.disabled = true;
+        statusInfo.innerText = "Gemini sedang berpikir...";
+        const aiMsgDiv = appendMessage('ai', '...');
+
+        try {
+            // LOGIKA PEMBUATAN GAMBAR (Workaround)
+            const imageKeywords = ["buatkan gambar", "generate image", "gambar kan", "lukiskan"];
+            const isImageRequest = imageKeywords.some(keyword => text.toLowerCase().includes(keyword));
+
+            if (isImageRequest) {
+                const promptGambar = text.replace(/buatkan gambar|generate image|gambar kan|lukiskan/gi, "").trim();
+                const imageUrl = `https://pollinations.ai/p/${encodeURIComponent(promptGambar)}?width=1024&height=1024&seed=${Math.floor(Math.random() * 1000)}`;
+                
+                aiMsgDiv.innerHTML = `Tentu, ini gambar **${promptGambar}** yang Anda minta: <br> <img src="${imageUrl}" class="gen-img" onclick="window.open(this.src)">`;
+                // Tetap kirim ke Gemini agar chat history terjaga
+                await chatSession.sendMessage(`User meminta gambar: ${promptGambar}. Saya sudah menampilkannya.`);
+            } else {
+                // LOGIKA CHAT BIASA ATAU ANALISIS GAMBAR
+                let result;
+                if (imagePart) {
+                    // Jika ada gambar, gunakan model.generateContent (multimodal chat session agak kompleks, kita pakai direct call)
+                    const model = genAI.getGenerativeModel({ model: "gemini-3-flash" });
+                    result = await model.generateContent([text || "Apa isi gambar ini?", imagePart]);
+                } else {
+                    result = await chatSession.sendMessage(text);
+                }
+                
+                const response = await result.response;
+                aiMsgDiv.innerText = response.text();
+            }
+        } catch (error) {
+            aiMsgDiv.innerText = "Kesalahan: " + error.message;
+        } finally {
+            sendBtn.disabled = false;
+            statusInfo.innerText = "Ready";
+            scrollToBottom();
+        }
+    };
+
+    window.clearChat = () => {
+        chatSession = null;
+        document.getElementById('chat-box').innerHTML = '<div class="message ai">Chat direset. Saya siap membantu lagi!</div>';
+        cancelImage();
+    };
+
+    window.handleKeyPress = (e) => {
+        if (e.key === 'Enter') sendMessage();
+    };
+
+    function appendMessage(role, text) {
+        const chatBox = document.getElementById('chat-box');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${role}`;
+        msgDiv.innerText = text;
+        chatBox.appendChild(msgDiv);
+        scrollToBottom();
+        return msgDiv;
+    }
+
+    function scrollToBottom() {
+        const chatBox = document.getElementById('chat-box');
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
